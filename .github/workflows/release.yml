@@ -1,0 +1,29 @@
+name: Package and Release
+
+# Deploy on all pushes to master, except '.github/**' folder.
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - '**'
+    paths-ignore:
+      - '.github/**'
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    
+    env:
+      GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:    
+      - name: Clone project
+        uses: actions/checkout@v4
+
+      - uses: leafo/gh-actions-lua@v8.0.0
+
+      - name: Package and Release
+        uses: BigWigsMods/packager@v2
+        with:
+          args: -L
