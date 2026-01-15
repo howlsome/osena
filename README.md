@@ -13,7 +13,7 @@ Apply fixed-size presets across the WoW UI, with one-click restore to Blizzardâ€
 ## Installation
 
 1. Copy the `Osena` folder into `_retail_/Interface/AddOns/`.
-2. Ensure `Osena.lua` is present and listed in `Osena.toc`.
+2. Ensure `Osena.lua` is present and listed in `osena.toc`.
 3. `/reload`
 
 ## Usage
