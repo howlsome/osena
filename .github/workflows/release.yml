@@ -1,10 +1,10 @@
 name: Package and Release
 
-# Deploy on all pushes to master, except '.github/**' folder.
+# Deploy on all pushes to main, except '.github/**' folder.
 on:
   push:
     branches:
-      - master
+      - main
     tags:
       - '**'
     paths-ignore:
