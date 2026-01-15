@@ -1,0 +1,7 @@
+## Interface: 120000
+## Title: Osena
+## Notes: Apply font size presets to all UI fonts.
+## Author: Howlsome
+## Version: 12.0.0
+## SavedVariables: OsenaDB
+osena.lua
