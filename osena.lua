@@ -2,6 +2,8 @@ local ADDON_NAME = ...
 local Osena = {}
 _G.Osena = Osena
 
+local FONT_SIZE = 18
+
 -- Safe addon load helpers
 local function isAddonLoaded(name)
   if C_AddOns and C_AddOns.IsAddOnLoaded then return C_AddOns.IsAddOnLoaded(name) end
@@ -14,26 +16,14 @@ local function loadAddon(name)
   return false
 end
 
--- Presets (no Custom)
-local PRESETS = {
-  Small  = { label = "Small (18px)",  chat = 18, quest = 18, all = 18 },
-  Medium = { label = "Medium (20px)", chat = 20, quest = 20, all = 20 },
-  Large  = { label = "Large (24px)",  chat = 24, quest = 24, all = 24 },
-  XL     = { label = "XL (28px)",     chat = 28, quest = 28, all = 28 },
-  XXL    = { label = "XXL (32px)",    chat = 32, quest = 32, all = 32 },
-}
-local PRESET_ORDER = { "Small", "Medium", "Large", "XL", "XXL" }
-
 OsenaDB = OsenaDB or {}
 local defaults = {
   profile = {
-    chatFontSize = 18,
-    questFontSize = 18,
-    activePreset = "Small",
+    applied = true,
     showLoginMessage = true,
     autoApplyOnLogin = true,
   },
-  originalFonts = {}, -- Blizzard defaults snapshot
+  originalFonts = {},
 }
 
 -- Base fonts (always apply)
@@ -49,7 +39,7 @@ local BASE_FONTS = {
   "GameTooltipHeader", "GameTooltipText", "GameTooltipTextSmall",
 }
 
--- Inlined discovery
+-- Font discovery
 local discoveredFonts, discoveredList = {}, {}
 local function addName(name)
   if name and name ~= "" and not discoveredFonts[name] then
@@ -101,18 +91,10 @@ local function ensureProfileDefaults()
       OsenaDB.profile[k] = deepcopy(v)
     end
   end
-  if not PRESETS[OsenaDB.profile.activePreset] then
-    OsenaDB.profile.activePreset = "Small"
-    OsenaDB.profile.chatFontSize = PRESETS.Small.chat
-    OsenaDB.profile.questFontSize = PRESETS.Small.quest
-  end
-end
-
-local function resetToDefaults()
-  OsenaDB.profile = deepcopy(defaults.profile)
-  if Osena.ApplyPresetToAll then Osena.ApplyPresetToAll(Osena:GetActivePreset(), true) end
-  if Osena.RescaleUIForPreset then Osena.RescaleUIForPreset(Osena:GetActivePreset()) end
-  print("|cff66ccffOsena|r: Settings reset to defaults.")
+  -- Migration: clear out old preset fields
+  OsenaDB.profile.activePreset = nil
+  OsenaDB.profile.chatFontSize = nil
+  OsenaDB.profile.questFontSize = nil
 end
 
 -- Safe font setter
@@ -142,7 +124,28 @@ local function snapshotBlizzardFonts()
   end
 end
 
-function Osena.RestoreBlizzardFonts()
+-- Apply 18px to all fonts
+function Osena.ApplyFonts(silent)
+  runDiscovery()
+  for _, fontName in ipairs(BASE_FONTS) do
+    Osena:SetFontObjectSize(fontName, FONT_SIZE)
+  end
+  if ChatFontNormal then
+    local ok, path, _, flags = pcall(ChatFontNormal.GetFont, ChatFontNormal)
+    if ok and path then safeSetFont(ChatFontNormal, path, FONT_SIZE, flags) end
+  end
+  for _, fontName in ipairs(discoveredList) do
+    Osena:SetFontObjectSize(fontName, FONT_SIZE)
+  end
+  OsenaDB.profile.applied = true
+  Osena:UpdateStatusText()
+  if not silent then
+    print(string.format("|cff66ccffOsena|r: Applied %dpx to %d fonts.", FONT_SIZE, #discoveredList))
+  end
+end
+
+-- Restore Blizzard defaults
+function Osena.RestoreBlizzardFonts(silent)
   local store = OsenaDB.originalFonts
   if not store or next(store) == nil then
     print("|cff66ccffOsena|r: Blizzard defaults were not captured yet.")
@@ -154,10 +157,14 @@ function Osena.RestoreBlizzardFonts()
       safeSetFont(fo, data.path, data.size, data.flags)
     end
   end
-  print("|cff66ccffOsena|r: Restored Blizzard font defaults.")
+  OsenaDB.profile.applied = false
+  Osena:UpdateStatusText()
+  if not silent then
+    print("|cff66ccffOsena|r: Restored Blizzard font defaults.")
+  end
 end
 
--- Apply font size to a font object
+-- Set font size on a named font object
 function Osena:SetFontObjectSize(fontObjName, size)
   if type(fontObjName) ~= "string" or type(size) ~= "number" then return end
   local fo = _G[fontObjName]; if not fo or not fo.GetFont then return end
@@ -166,62 +173,22 @@ function Osena:SetFontObjectSize(fontObjName, size)
   safeSetFont(fo, path, size, flags)
 end
 
-function Osena:GetPresets() return PRESETS end
-function Osena:GetActivePreset()
-  local p = OsenaDB.profile.activePreset
-  if not p or not PRESETS[p] then return "Small" end
-  return p
-end
-local function applyPresetToProfile(name)
-  local p = PRESETS[name]; if not p then return end
-  OsenaDB.profile.activePreset = name
-  OsenaDB.profile.chatFontSize = p.chat
-  OsenaDB.profile.questFontSize = p.quest
-  if Osena.RescaleUIForPreset then Osena.RescaleUIForPreset(name) end
-end
-
--- Apply preset to base fonts and discovered fonts
-local function applyBaseFonts(preset)
-  for _, fontName in ipairs(BASE_FONTS) do
-    Osena:SetFontObjectSize(fontName, preset.all)
-  end
-  if ChatFontNormal then
-    local ok, path, _, flags = pcall(ChatFontNormal.GetFont, ChatFontNormal)
-    if ok and path then safeSetFont(ChatFontNormal, path, preset.chat or preset.all, flags) end
+-- Status text management
+local statusText = nil
+function Osena:UpdateStatusText()
+  if not statusText then return end
+  if OsenaDB.profile.applied then
+    statusText:SetText(string.format("Currently set to |cff00ff00%dpx|r for all UI text.", FONT_SIZE))
+  else
+    statusText:SetText("Currently |cffffcc00reset to Blizzard defaults|r.")
   end
 end
 
-function Osena.ApplyPresetToAll(presetName, silent)
-  local preset = PRESETS[presetName]
-  if not preset or not preset.all then
-    if not silent then print("|cff66ccffOsena|r: Active preset is invalid.") end
-    return
-  end
-  applyBaseFonts(preset)
-  runDiscovery()
-  for _, fontName in ipairs(discoveredList) do
-    Osena:SetFontObjectSize(fontName, preset.all)
-  end
-  if not silent then
-    print(string.format("|cff66ccffOsena|r: Applied '%s' (%d) to %d fonts.", preset.label or presetName, preset.all, #discoveredList))
-  end
-end
-
--- Button autoscale registry
-local buttonRegistry = {}
-local function RegisterButton(btn)
-  if not btn then return end
-  buttonRegistry[#buttonRegistry + 1] = { btn = btn, w = btn:GetWidth(), h = btn:GetHeight(), fs = btn:GetFontString() }
-end
-function Osena.RescaleUIForPreset(presetName)
-  local preset = PRESETS[presetName]; local size = preset and preset.all or 20
-  local dh = (size - 20) * 0.7; local dw = (size - 20) * 5.0
-  for _, entry in ipairs(buttonRegistry) do
-    local bw = math.max(120, entry.w + dw)
-    local bh = math.max(22, entry.h + dh)
-    entry.btn:SetSize(bw, bh)
-    if entry.fs then entry.fs:SetWordWrap(false) end
-  end
+-- Reset settings to defaults
+local function resetToDefaults()
+  OsenaDB.profile = deepcopy(defaults.profile)
+  Osena.ApplyFonts(true)
+  print("|cff66ccffOsena|r: Settings reset to defaults.")
 end
 
 -- Forward declarations
@@ -230,7 +197,6 @@ Osena.settingsPanel, Osena.settingsCategoryID, Osena.legacyPanel = nil, nil, nil
 -- Build modern Settings panel
 function Osena.BuildSettingsPanel()
   if Osena.settingsPanel or not Settings then return end
-  if not isAddonLoaded("Blizzard_UIDropDownMenu") then loadAddon("Blizzard_UIDropDownMenu") end
 
   local panel = CreateFrame("Frame", nil, UIParent)
   panel.name = "Osena"; panel:Hide()
@@ -241,6 +207,7 @@ function Osena.BuildSettingsPanel()
   Settings.RegisterAddOnCategory(category)
 
   local y = -20
+
   local function addText(text, template, r, g, b, x)
     local fs = panel:CreateFontString(nil, "ARTWORK", template or "GameFontNormal")
     fs:SetTextColor(r or 1, g or 0.82, b or 0)
@@ -249,54 +216,50 @@ function Osena.BuildSettingsPanel()
     return fs
   end
 
+  -- Title
   addText("Osena", "GameFontNormalLarge"); y = y - 22
-  addText("Choose a preset and apply it to the entire UI.", "GameFontHighlightSmall", 0.9, 0.9, 0.9); y = y - 32
+  addText(string.format("Sets all UI text to %dpx for improved readability.", FONT_SIZE), "GameFontHighlightSmall", 0.9, 0.9, 0.9); y = y - 32
 
-  addText("Preset", "GameFontNormal", 1, 0.95, 0.75); y = y - 22
-  local presetDD = CreateFrame("Frame", nil, panel, "UIDropDownMenuTemplate")
-  presetDD:SetPoint("TOPLEFT", 8, y)
-  local function presetInit(self, level)
-    for _, name in ipairs(PRESET_ORDER) do
-      local info = UIDropDownMenu_CreateInfo()
-      info.text  = PRESETS[name].label or name
-      info.value = name
-      info.func = function(selfBtn)
-        local val = selfBtn.value
-        UIDropDownMenu_SetSelectedValue(presetDD, val)
-        applyPresetToProfile(val)
-      end
-      UIDropDownMenu_AddButton(info, level)
-    end
-  end
-  UIDropDownMenu_SetWidth(presetDD, 200)
-  UIDropDownMenu_Initialize(presetDD, presetInit)
-  UIDropDownMenu_SetSelectedValue(presetDD, Osena:GetActivePreset())
+  -- Status
+  addText("Status", "GameFontNormal", 1, 0.95, 0.75); y = y - 22
+  statusText = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+  statusText:SetPoint("TOPLEFT", 16, y)
+  Osena:UpdateStatusText()
+  y = y - 32
 
-  local applyPresetAllBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-  applyPresetAllBtn:SetSize(120, 24)
-  applyPresetAllBtn:SetPoint("LEFT", presetDD, "RIGHT", 12, 0)
-  applyPresetAllBtn:SetText("Apply All")
-  applyPresetAllBtn:GetFontString():SetWordWrap(false)
-  applyPresetAllBtn:SetScript("OnClick", function()
-    local p = Osena:GetActivePreset()
-    UIDropDownMenu_SetSelectedValue(presetDD, p)
-    Osena.ApplyPresetToAll(p, false)
+  -- Apply / Restore buttons
+  local applyBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+  applyBtn:SetSize(140, 26)
+  applyBtn:SetPoint("TOPLEFT", 16, y)
+  applyBtn:SetText(string.format("Apply %dpx", FONT_SIZE))
+  applyBtn:GetFontString():SetWordWrap(false)
+  applyBtn:SetScript("OnClick", function()
+    Osena.ApplyFonts(false)
   end)
-  RegisterButton(applyPresetAllBtn)
 
-  y = y - 52
+  local restoreBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+  restoreBtn:SetSize(180, 26)
+  restoreBtn:SetPoint("LEFT", applyBtn, "RIGHT", 10, 0)
+  restoreBtn:SetText("Restore Blizzard Defaults")
+  restoreBtn:GetFontString():SetWordWrap(false)
+  restoreBtn:SetScript("OnClick", function()
+    Osena.RestoreBlizzardFonts(false)
+  end)
 
-  addText("Auto-apply on login/reload", "GameFontNormal", 1, 0.95, 0.75); y = y - 22
+  y = y - 44
+
+  -- Options
+  addText("Options", "GameFontNormal", 1, 0.95, 0.75); y = y - 24
+
   local autoCheck = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
-  autoCheck.text:SetText("Auto-apply preset on login/reload")
+  autoCheck.text:SetText("Auto-apply on login and reload")
   autoCheck:SetPoint("TOPLEFT", 16, y)
   autoCheck:SetChecked(OsenaDB.profile.autoApplyOnLogin)
   autoCheck:SetScript("OnClick", function(self)
     OsenaDB.profile.autoApplyOnLogin = self:GetChecked() and true or false
   end)
-  y = y - 32
+  y = y - 28
 
-  addText("Login Message", "GameFontNormal", 1, 0.95, 0.75); y = y - 22
   local loginCheck = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
   loginCheck.text:SetText("Show login message")
   loginCheck:SetPoint("TOPLEFT", 16, y)
@@ -304,34 +267,19 @@ function Osena.BuildSettingsPanel()
   loginCheck:SetScript("OnClick", function(self)
     OsenaDB.profile.showLoginMessage = self:GetChecked() and true or false
   end)
-  y = y - 30
+  y = y - 36
 
+  -- Reset
   local resetBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-  resetBtn:SetSize(100, 24)
+  resetBtn:SetSize(120, 26)
   resetBtn:SetPoint("TOPLEFT", 16, y)
-  resetBtn:SetText("Reset")
+  resetBtn:SetText("Reset Settings")
   resetBtn:GetFontString():SetWordWrap(false)
   resetBtn:SetScript("OnClick", function()
     resetToDefaults()
-    loginCheck:SetChecked(OsenaDB.profile.showLoginMessage)
     autoCheck:SetChecked(OsenaDB.profile.autoApplyOnLogin)
-    UIDropDownMenu_SetSelectedValue(presetDD, Osena:GetActivePreset())
+    loginCheck:SetChecked(OsenaDB.profile.showLoginMessage)
   end)
-  RegisterButton(resetBtn)
-
-  local blizzBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-  blizzBtn:SetSize(120, 24)
-  blizzBtn:SetPoint("LEFT", resetBtn, "RIGHT", 10, 0)
-  blizzBtn:SetText("Default Blizz")
-  blizzBtn:GetFontString():SetWordWrap(false)
-  blizzBtn:SetScript("OnClick", function()
-    Osena.RestoreBlizzardFonts()
-    UIDropDownMenu_SetSelectedValue(presetDD, Osena:GetActivePreset())
-  end)
-  RegisterButton(blizzBtn)
-
-  y = y - 32
-  Osena.RescaleUIForPreset(Osena:GetActivePreset())
 end
 
 -- Legacy fallback panel
@@ -343,7 +291,7 @@ function Osena.BuildLegacyPanel()
   title:SetPoint("TOPLEFT", 16, -16); title:SetText("Osena - Font Accessibility")
   local note = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
   note:SetPoint("TOPLEFT", 16, -40); note:SetWidth(500); note:SetJustifyH("LEFT")
-  note:SetText("Use /osena to open settings and apply presets or restore Blizzard fonts. (Legacy panel)")
+  note:SetText("Use /osena to open settings and apply fonts or restore Blizzard defaults. (Legacy panel)")
   InterfaceOptions_AddCategory(panel)
   Osena.legacyPanel = panel
 end
@@ -358,13 +306,26 @@ local function EnsurePanel()
   end
 end
 
--- Slash
+-- Slash commands
 SLASH_OSENA1 = "/osena"
 SlashCmdList.OSENA = function(msg)
-  msg = msg and msg:lower() or ""
-  if msg == "scan" then
+  msg = msg and msg:lower():match("^%s*(.-)%s*$") or ""
+  if msg == "apply" then
+    Osena.ApplyFonts(false)
+    return
+  elseif msg == "reset" then
+    Osena.RestoreBlizzardFonts(false)
+    return
+  elseif msg == "status" then
+    if OsenaDB.profile.applied then
+      print(string.format("|cff66ccffOsena|r: Currently set to |cff00ff00%dpx|r.", FONT_SIZE))
+    else
+      print("|cff66ccffOsena|r: Currently |cffffcc00reset to Blizzard defaults|r.")
+    end
+    return
+  elseif msg == "scan" then
     runDiscovery()
-    print(string.format("|cff66ccffOsena|r: Discovered %d font objects. Apply a preset to affect them.", #discoveredList))
+    print(string.format("|cff66ccffOsena|r: Discovered %d font objects.", #discoveredList))
     return
   end
   local mode = EnsurePanel()
@@ -382,11 +343,15 @@ end
 local function initAddon()
   ensureProfileDefaults()
   snapshotBlizzardFonts()
-  if OsenaDB.profile.autoApplyOnLogin then
-    Osena.ApplyPresetToAll(Osena:GetActivePreset(), true)
+  if OsenaDB.profile.autoApplyOnLogin and OsenaDB.profile.applied then
+    Osena.ApplyFonts(true)
   end
   if OsenaDB.profile.showLoginMessage then
-    print("|cff66ccffOsena|r loaded. Use Esc > Options > AddOns > Osena or /osena.")
+    if OsenaDB.profile.applied then
+      print(string.format("|cff66ccffOsena|r loaded — %dpx applied. Type /osena for options.", FONT_SIZE))
+    else
+      print("|cff66ccffOsena|r loaded — Blizzard defaults active. Type /osena for options.")
+    end
   end
   EnsurePanel()
 end
