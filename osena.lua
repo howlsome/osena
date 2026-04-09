@@ -4,17 +4,6 @@ _G.Osena = Osena
 
 local FONT_SIZE = 18
 
--- Safe addon load helpers
-local function isAddonLoaded(name)
-  if C_AddOns and C_AddOns.IsAddOnLoaded then return C_AddOns.IsAddOnLoaded(name) end
-  if _G.IsAddOnLoaded then return _G.IsAddOnLoaded(name) end
-  return false
-end
-local function loadAddon(name)
-  if C_AddOns and C_AddOns.LoadAddOn then return C_AddOns.LoadAddOn(name) end
-  if _G.LoadAddOn then return _G.LoadAddOn(name) end
-  return false
-end
 
 OsenaDB = OsenaDB or {}
 local defaults = {
@@ -36,7 +25,6 @@ local BASE_FONTS = {
   "SystemFont_Shadow_Med1", "SystemFont_Shadow_Med2",
   "SystemFont_Shadow_Med3", "SystemFont_Shadow_Large",
   "SystemFont_Shadow_Huge1", "SystemFont_Shadow_Huge2",
-  "GameTooltipHeader", "GameTooltipText", "GameTooltipTextSmall",
 }
 
 -- Font discovery
